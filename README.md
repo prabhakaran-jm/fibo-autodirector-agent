@@ -32,3 +32,63 @@ AutoDirector makes visual generation predictable and repeatable.
 
 ## Status
 Early scaffold – core ingestion and planning in progress.
+
+## Backend Quickstart
+
+### Prerequisites
+
+- Python 3.10+
+- pip or uv
+
+### Setup
+
+1. Install dependencies:
+   ```bash
+   cd apps/api
+   pip install -e .
+   ```
+
+2. Create `.env` file in project root:
+   ```
+   FIBO_API_KEY=your_key_here
+   FIBO_API_BASE=https://api.bria.ai
+   ```
+
+3. Run the API server:
+   ```bash
+   cd apps/api
+   # After pip install -e ., you can use:
+   uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+   # Or without installation:
+   uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+4. Test the API:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+### Smoke Test
+
+See [docs/smoke-test.md](docs/smoke-test.md) for complete curl-based smoke test commands.
+
+Quick test flow:
+```bash
+# Ingest CSV
+curl -X POST "http://localhost:8000/ingest/csv" \
+  -F "file=@data/samples/products.csv"
+
+# Plan (use batch_id from above)
+curl -X POST "http://localhost:8000/plan?batch_id=<BATCH_ID>"
+
+# List shots
+curl http://localhost:8000/shots
+
+# Get a shot
+curl http://localhost:8000/shots/PROD-001
+
+# Render (stub)
+curl -X POST "http://localhost:8000/render" \
+  -H "Content-Type: application/json" \
+  -d '{"shot_ids": ["PROD-001"]}'
+```

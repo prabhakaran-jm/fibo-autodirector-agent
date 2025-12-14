@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FIBO Shot Schema",
+  "type": "object",
+  "required": ["shot_id", "subject", "camera", "lens", "lighting", "color", "background", "output"],
+  "properties": {
+    "shot_id": {
+      "type": "string",
+      "description": "Unique identifier for the shot"
+    },
+    "subject": {
+      "type": "string",
+      "description": "Subject description"
+    },
+    "camera": {
+      "type": "object",
+      "required": ["fov", "position", "rotation"],
+      "properties": {
+        "fov": {
+          "type": "number",
+          "description": "Field of view in degrees"
+        },
+        "position": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "properties": {
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "z": {"type": "number"}
+          }
+        },
+        "rotation": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "properties": {
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "z": {"type": "number"}
+          }
+        }
+      }
+    },
+    "lens": {
+      "type": "object",
+      "required": ["aperture", "focal_length"],
+      "properties": {
+        "aperture": {
+          "type": "number",
+          "description": "Aperture value"
+        },
+        "focal_length": {
+          "type": "number",
+          "description": "Focal length in mm"
+        }
+      }
+    },
+    "lighting": {
+      "type": "object",
+      "required": ["key_light", "rim_light"],
+      "properties": {
+        "key_light": {
+          "type": "object",
+          "required": ["intensity", "position"],
+          "properties": {
+            "intensity": {"type": "number"},
+            "position": {
+              "type": "object",
+              "required": ["x", "y", "z"],
+              "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "z": {"type": "number"}
+              }
+            }
+          }
+        },
+        "rim_light": {
+          "type": "object",
+          "required": ["intensity", "position"],
+          "properties": {
+            "intensity": {"type": "number"},
+            "position": {
+              "type": "object",
+              "required": ["x", "y", "z"],
+              "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "z": {"type": "number"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "color": {
+      "type": "object",
+      "required": ["palette"],
+      "properties": {
+        "palette": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of color hex codes"
+        }
+      }
+    },
+    "background": {
+      "type": "object",
+      "required": ["hex"],
+      "properties": {
+        "hex": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Background color as hex code"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "description": "Output width in pixels"
+        },
+        "height": {
+          "type": "integer",
+          "description": "Output height in pixels"
+        }
+      }
+    },
+    "hash": {
+      "type": "string",
+      "description": "Deterministic hash of the shot"
+    }
+  }
+}
+
