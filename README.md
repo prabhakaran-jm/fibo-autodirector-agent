@@ -226,10 +226,7 @@ curl http://localhost:8000/jobs/$JOB_ID
 curl http://localhost:8000/shots/PROD-001
 ```
 
-## Real Bria FIBO Output (Proof)
+## Live Bria FIBO proof
+See `docs/real-fibo-example/` for a real Bria render captured via this backend, including request, response, explain output, and the downloaded image.
 
-See `docs/real-fibo-example/` for:
-- the exact request/response
-- the structured prompt used
-- the downloaded output image
 
