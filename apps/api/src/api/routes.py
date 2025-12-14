@@ -105,8 +105,9 @@ async def plan(
 
     shots = []
     for row in batch["rows"]:
-        shot = expand_record_to_shot(row, preset_id)
+        shot, rules_applied = expand_record_to_shot(row, preset_id)
         shot["hash"] = hash_shot(shot)
+        shot["_rules_applied"] = rules_applied  # Store for explain endpoint
         shots.append(shot)
 
     save_shots(shots, batch_id=batch_id)
@@ -300,31 +301,55 @@ async def rerender_shot(shot_id: str, request: RerenderRequest):
     
     # Deep merge patch
     from .rules import deep_merge
-    patched = deep_merge(latest.copy(), request.json_patch)
-    
+
+    def _track_changes(old_dict, new_dict, path=""):
+        """Recursively track changes between dicts."""
+        changes = []
+        all_keys = set(old_dict.keys()) | set(new_dict.keys())
+        for key in all_keys:
+            current_path = f"{path}.{key}" if path else key
+            old_val = old_dict.get(key)
+            new_val = new_dict.get(key)
+            if isinstance(old_val, dict) and isinstance(new_val, dict):
+                changes.extend(_track_changes(old_val, new_val, current_path))
+            elif old_val != new_val:
+                changes.append(
+                    f"rerender patch → {current_path} changed {old_val} → {new_val}"
+                )
+        return changes
+
+    patched = latest.copy()
+    patch_rules = _track_changes(latest, request.json_patch)
+    patched = deep_merge(patched, request.json_patch)
+
     # Apply preset if provided
     if request.preset_id:
         from .rules import load_preset
         preset = load_preset(request.preset_id)
         if preset:
             patched = deep_merge(patched, preset)
-    
+            patch_rules.append(f"preset={request.preset_id} → applied preset")
+
     # Get parent hash
     versions = get_shot_versions(shot_id)
     parent_hash = None
     if versions:
         latest_version = max(versions, key=lambda v: v["version"])
         parent_hash = latest_version["hash"]
-    
+
     # Get batch_id from latest version
     batch_id = None
     if versions:
         latest_version = max(versions, key=lambda v: v["version"])
         batch_id = latest_version.get("batch_id")
-    
+
     # Create new version
     new_version = create_shot_version(
-        shot_id, patched, parent_hash=parent_hash, batch_id=batch_id
+        shot_id,
+        patched,
+        parent_hash=parent_hash,
+        batch_id=batch_id,
+        rules_applied=patch_rules,
     )
     
     # Enqueue render job
@@ -408,21 +433,61 @@ async def compare_versions(
     """Compare two versions of a shot."""
     v1 = get_shot_version(shot_id, from_version)
     v2 = get_shot_version(shot_id, to_version)
-    
+
     if not v1 or not v2:
         raise HTTPException(
             status_code=404, detail="One or both versions not found"
         )
-    
-    changes = _compare_dicts(
-        v1["json_payload"], v2["json_payload"]
-    )
-    
+
+    changes = _compare_dicts(v1["json_payload"], v2["json_payload"])
+
     return {
         "shot_id": shot_id,
         "from_version": from_version,
         "to_version": to_version,
         "changes": changes,
+    }
+
+
+@router.get("/shots/{shot_id}/explain")
+async def explain_shot(shot_id: str):
+    """Explain how a shot was generated (deterministic explanation)."""
+    versions = get_shot_versions(shot_id)
+    if not versions:
+        raise HTTPException(
+            status_code=404, detail=f"Shot {shot_id} not found"
+        )
+
+    latest = max(versions, key=lambda v: v["version"])
+    shot_json = latest["json_payload"]
+
+    # Extract derived parameters (non-default values)
+    derived_params = {}
+    if shot_json.get("camera", {}).get("fov") != 45:
+        derived_params["camera.fov"] = shot_json["camera"]["fov"]
+    if shot_json.get("lens", {}).get("aperture") != 2.8:
+        derived_params["lens.aperture"] = shot_json["lens"]["aperture"]
+    if shot_json.get("lighting", {}).get("key_light", {}).get("intensity") != 1.0:
+        derived_params["lighting.key_light.intensity"] = (
+            shot_json["lighting"]["key_light"]["intensity"]
+        )
+
+    # Get all rules applied across versions
+    all_rules = []
+    for version in versions:
+        all_rules.extend(version.get("rules_applied", []))
+
+    return {
+        "shot_id": shot_id,
+        "version": latest["version"],
+        "hash": latest["hash"],
+        "rules_applied": all_rules,
+        "derived_parameters": derived_params,
+        "why_this_is_reproducible": (
+            "All parameters are explicit JSON fields. "
+            "Re-running this JSON produces the same hash and output. "
+            "No prompts, no randomness, no drift."
+        ),
     }
 
 

@@ -7,9 +7,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI
 
 from .storage import (
-    get_shot,
     get_shot_latest_version,
-    get_shot_version,
     get_artifact_by_hash,
     save_artifact_by_hash,
     update_shot_status,
@@ -43,8 +41,8 @@ async def _render_shot(
     """Render a single shot (or specific version)."""
     # Get shot - use version if specified, otherwise latest
     if version:
-        from .storage import get_shot_version
-        version_obj = get_shot_version(shot_id, version)
+        from .storage import get_shot_version as get_version
+        version_obj = get_version(shot_id, version)
         if not version_obj:
             return {
                 "shot_id": shot_id,

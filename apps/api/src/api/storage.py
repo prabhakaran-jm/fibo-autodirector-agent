@@ -63,6 +63,7 @@ def save_shots(shots: List[Dict], batch_id: Optional[str] = None) -> None:
                 "review_note": None,
                 "reviewed_at": None,
                 "created_at": datetime.utcnow().isoformat(),
+                "rules_applied": shot.get("_rules_applied", []),
             }
             
             # Initialize versions list if needed
@@ -113,6 +114,7 @@ def create_shot_version(
     json_payload: Dict,
     parent_hash: Optional[str] = None,
     batch_id: Optional[str] = None,
+    rules_applied: Optional[List[str]] = None,
 ) -> Dict:
     """Create a new version of a shot."""
     versions = _shot_versions.get(shot_id, [])
@@ -135,6 +137,7 @@ def create_shot_version(
         "review_note": None,
         "reviewed_at": None,
         "created_at": datetime.utcnow().isoformat(),
+        "rules_applied": rules_applied or [],
     }
     
     if shot_id not in _shot_versions:
@@ -376,8 +379,18 @@ def write_manifest(batch_id: str) -> Dict[str, str]:
     
     shots = get_shots_by_batch(batch_id)
     
-    # Build manifest
+    # Build manifest with production metadata
+    from .config import FIBO_PROVIDER
+
     manifest = {
+        "generator": "FIBO AutoDirector Agent",
+        "generated_at": datetime.utcnow().isoformat(),
+        "provider": FIBO_PROVIDER,
+        "schema_version": "v1",
+        "reproducibility": {
+            "hashing": "sha256(normalized_json)",
+            "cache_enabled": True,
+        },
         "batch_id": batch_id,
         "created_at": _batches.get(batch_id, {}).get("created_at"),
         "shots": [],

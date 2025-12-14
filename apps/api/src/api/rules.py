@@ -1,9 +1,8 @@
 """Rules for expanding CSV records into FIBO-style shot JSON."""
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 def deep_merge(base: Dict, overlay: Dict) -> Dict:
@@ -29,7 +28,9 @@ def load_preset(preset_id: str) -> Optional[Dict]:
     return None
 
 
-def expand_record_to_shot(record: Dict, preset_id: Optional[str] = None) -> Dict:
+def expand_record_to_shot(
+    record: Dict, preset_id: Optional[str] = None
+) -> tuple[Dict, List[str]]:
     """
     Expand a CSV record into a FIBO-style shot JSON.
     
@@ -38,8 +39,10 @@ def expand_record_to_shot(record: Dict, preset_id: Optional[str] = None) -> Dict
         preset_id: Optional preset ID to load and merge
     
     Returns:
-        Shot JSON with shot_id, subject, camera, lens, lighting, color, background, output
+        Tuple of (shot JSON, rules_applied list)
     """
+    rules_applied = []
+    
     # Base shot structure
     shot = {
         "shot_id": record.get("sku", "unknown"),
@@ -83,17 +86,25 @@ def expand_record_to_shot(record: Dict, preset_id: Optional[str] = None) -> Dict
     if finish == "glossy":
         shot["lighting"]["key_light"]["intensity"] = 0.7
         shot["lighting"]["rim_light"]["intensity"] = 0.8
+        rules_applied.append(
+            "finish=glossy → reduced key light intensity to 0.7, "
+            "enhanced rim light to 0.8"
+        )
     
     # Rule: if category == macro, increase fov and aperture
     if category == "macro":
         shot["camera"]["fov"] = 60
         shot["lens"]["aperture"] = 1.4
+        rules_applied.append(
+            "category=macro → increased fov to 60, aperture to 1.4"
+        )
     
     # Load and merge preset if provided
     if preset_id:
         preset = load_preset(preset_id)
         if preset:
             shot = deep_merge(shot, preset)
+            rules_applied.append(f"preset={preset_id} → applied preset")
     
-    return shot
+    return shot, rules_applied
 

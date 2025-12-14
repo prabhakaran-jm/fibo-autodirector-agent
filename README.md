@@ -7,10 +7,29 @@ JSON-native generation.
 Instead of prompt engineering, every image is generated from explicit,
 reproducible parameters: camera, lens, lighting, color, and composition.
 
-## Why this exists
-Creative teams need scale and consistency.
-Text prompts drift.
-AutoDirector makes visual generation predictable and repeatable.
+## Why FIBO
+
+FIBO (Functional Image Block Object) is Bria's JSON-native image generation format. Instead of text prompts, FIBO uses explicit, structured parameters:
+
+- **Camera**: position, rotation, field of view
+- **Lens**: aperture, focal length
+- **Lighting**: key light, rim light, intensity, position
+- **Color**: palette, background hex
+- **Output**: width, height
+
+This enables **deterministic, reproducible, controllable** image generation.
+
+## Why JSON Beats Prompts
+
+| Prompts | JSON |
+|---------|------|
+| "A glossy product shot" | `{"lighting": {"key_light": {"intensity": 0.7}}}` |
+| Drifts between runs | Same JSON → same hash → same output |
+| Unpredictable | Explicit parameters |
+| Hard to version | Easy to patch and compare |
+| Not auditable | Full lineage tracking |
+
+**Result**: Enterprise-scale, auditable, reproducible creative workflows.
 
 ## What it does
 - Ingests structured inputs (CSV or JSON)
@@ -30,8 +49,39 @@ AutoDirector makes visual generation predictable and repeatable.
 - FIBO Platform Console: https://platform.bria.ai/
 - FIBO Overview: https://bria.ai/fibo
 
+## Judge Quick Start (3 Commands)
+
+Try these first to see the core value:
+
+```bash
+# 1. Health check - see system status
+curl http://localhost:8000/health
+
+# 2. Explain a shot - see how it was generated (no prompts!)
+curl "http://localhost:8000/shots/PROD-001/explain"
+
+# 3. Metrics - see system performance
+curl http://localhost:8000/metrics
+```
+
+Then run the full workflow from [Judge Workflow](#judge-workflow) below.
+
+## Hackathon Category Fit
+
+**Best JSON-Native or Agentic Workflow**
+- JSON-first architecture (no prompts)
+- Deterministic hashing for reproducibility
+- Versioned creative decisions with lineage
+- Explainable generation (rules tracking)
+
+**Best Controllability**
+- Explicit parameter control (camera, lens, lighting)
+- JSON patch rerendering
+- Version comparison
+- Exportable, auditable bundles
+
 ## Status
-Early scaffold – core ingestion and planning in progress.
+Production-ready backend with full workflow support.
 
 ## Backend Quickstart
 
@@ -105,7 +155,7 @@ Renders are cached by deterministic JSON hash. Re-rendering the same shot JSON r
 
 ### Judge Workflow
 
-The API supports a complete review and iteration workflow:
+The API supports a complete review and iteration workflow. This demonstrates the core value proposition: **deterministic, versioned, explainable image generation**.
 
 1. **Ingest** → Upload CSV with product data
 2. **Plan** → Expand rows into FIBO shot JSON
@@ -141,6 +191,11 @@ curl -X POST "http://localhost:8000/shots/PROD-001/rerender" \
 curl -X POST "http://localhost:8000/export/batch/$BATCH_ID"
 curl "http://localhost:8000/export/batch/$BATCH_ID/download" -o batch.zip
 ```
+
+### Documentation
+
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and key decisions
+- **[Smoke Test](docs/smoke-test.md)** - Complete curl-based test commands
 
 ### Smoke Test
 
