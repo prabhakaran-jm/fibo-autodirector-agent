@@ -105,7 +105,8 @@ Production-ready backend with full workflow support.
    
    # Required only for Bria provider
    FIBO_API_KEY=your_key_here
-   FIBO_API_BASE=https://api.bria.ai
+   FIBO_API_BASE=https://engine.prod.bria-api.com
+   FIBO_API_ENDPOINT=/v2/image/generate
    
    # Optional: timeout and concurrency
    FIBO_TIMEOUT_SECONDS=120
@@ -224,3 +225,11 @@ curl http://localhost:8000/jobs/$JOB_ID
 # Verify shot has artifact_url
 curl http://localhost:8000/shots/PROD-001
 ```
+
+## Real Bria FIBO Output (Proof)
+
+See `docs/real-fibo-example/` for:
+- the exact request/response
+- the structured prompt used
+- the downloaded output image
+

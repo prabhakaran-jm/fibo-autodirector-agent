@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 from enum import Enum
 
@@ -45,4 +45,21 @@ class JobProgressResponse(BaseModel):
     status: str
     progress: dict  # {"completed": int, "total": int}
     results: List[RenderResponseItem]
+
+
+class RenderShotSyncRequest(BaseModel):
+    """Request to render a single raw shot JSON."""
+
+    shot: Dict
+    preset_id: Optional[str] = None
+
+
+class RenderShotSyncResponse(BaseModel):
+    """Response from rendering a single shot."""
+
+    shot_id: str
+    hash: str
+    cached: bool
+    url: str
+    provider: str
 

@@ -2,7 +2,17 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "FIBO Shot Schema",
   "type": "object",
-  "required": ["shot_id", "subject", "camera", "lens", "lighting", "color", "background", "output"],
+  "required": ["shot_id"],
+  "anyOf": [
+    {
+      "description": "Internal shot format",
+      "required": ["subject", "camera", "lens", "lighting", "color", "background", "output"]
+    },
+    {
+      "description": "Bria structured_prompt format",
+      "required": ["structured_prompt"]
+    }
+  ],
   "properties": {
     "shot_id": {
       "type": "string",
@@ -133,6 +143,17 @@
     "hash": {
       "type": "string",
       "description": "Deterministic hash of the shot"
+    },
+    "structured_prompt": {
+      "description": "Bria structured prompt (string or object). Required for Mode B.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,42 @@
+{
+  "shot_id": "real-fibo-demo-001",
+  "subject": "white leather sneaker on neutral background",
+  "camera": {
+    "angle": "three_quarter",
+    "fov": 35,
+    "distance": 1.8,
+    "height": 0.6
+  },
+  "lens": {
+    "aperture": 8,
+    "focus_mode": "subject",
+    "focus_target": "product"
+  },
+  "lighting": {
+    "key": {
+      "type": "softbox",
+      "intensity": 0.7,
+      "azimuth": 45,
+      "elevation": 25
+    },
+    "fill": {
+      "type": "bounce",
+      "intensity": 0.3
+    }
+  },
+  "color": {
+    "palette": "neutral",
+    "white_balance_k": 5200,
+    "contrast": "medium"
+  },
+  "background": {
+    "type": "sweep",
+    "hex": "#F2F4F7"
+  },
+  "output": {
+    "width": 1024,
+    "height": 1024,
+    "bit_depth": 16,
+    "hdr": false
+  }
+}

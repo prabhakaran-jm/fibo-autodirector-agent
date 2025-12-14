@@ -1,0 +1,42 @@
+{
+  "shot": {
+    "shot_id": "real-fibo-demo-001",
+    "structured_prompt": {
+      "short_description": "A clean, photorealistic studio product photo of a white leather low-top sneaker on a very light gray seamless background. The sneaker is centered and sharply detailed with soft, controlled highlights.",
+      "objects": [
+        {
+          "description": "A white leather low-top sneaker with a minimal design and clean stitching.",
+          "location": "center",
+          "relationship": "Primary subject, facing slightly to the right in a three-quarter view.",
+          "relative_size": "large within frame",
+          "shape_and_color": "Low-top sneaker; white upper with subtle off-white sole.",
+          "texture": "Smooth leather with visible stitching and a matte finish.",
+          "appearance_details": "Clean laces, crisp edges, subtle material grain, and accurate proportions.",
+          "orientation": "Three-quarter angle, toe slightly toward the viewer."
+        }
+      ],
+      "background_setting": "A neutral studio seamless paper sweep in very light gray (#F2F4F7), with a soft gradient and no distracting elements.",
+      "lighting": {
+        "conditions": "Soft studio lighting with controlled reflections.",
+        "direction": "Key light from front-left with gentle fill from the right.",
+        "shadows": "Soft, minimal shadow under the sneaker to ground it realistically."
+      },
+      "aesthetics": {
+        "composition": "Centered product composition with slight breathing room around the subject.",
+        "color_scheme": "Neutral cool tones with clean whites and subtle gray background.",
+        "mood_atmosphere": "Clean, modern, minimal, commercial product look.",
+        "preference_score": "high",
+        "aesthetic_score": "high"
+      },
+      "photographic_characteristics": {
+        "depth_of_field": "Moderate, keeping the full sneaker sharp with a subtle background falloff.",
+        "focus": "Sharp focus on the sneaker upper and laces, high clarity across edges.",
+        "camera_angle": "Slightly above eye-level, three-quarter product view.",
+        "lens_focal_length": "Product lens (e.g., 50mm-85mm) for natural proportions."
+      },
+      "style_medium": "photograph",
+      "context": "E-commerce product catalog image for a sneaker brand.",
+      "artistic_style": "photorealistic, clean, high detail"
+    }
+  }
+}

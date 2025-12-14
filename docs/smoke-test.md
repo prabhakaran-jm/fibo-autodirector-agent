@@ -211,6 +211,69 @@ Expected response (if API key is valid):
 }
 ```
 
+### Test with Raw Shot JSON (No Planning Required)
+```bash
+# Render a raw FIBO JSON payload directly (Bria proof)
+curl -X POST "http://localhost:8000/render/shot/sync" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "shot": {
+      "shot_id": "CUSTOM-001",
+      "subject": "Custom Product Shot",
+      "camera": {
+        "fov": 50,
+        "position": {"x": 0, "y": 0, "z": 5},
+        "rotation": {"x": 0, "y": 0, "z": 0}
+      },
+      "lens": {
+        "aperture": 2.8,
+        "focal_length": 50
+      },
+      "lighting": {
+        "key_light": {
+          "intensity": 1.0,
+          "position": {"x": 2, "y": 3, "z": 4}
+        },
+        "rim_light": {
+          "intensity": 0.5,
+          "position": {"x": -2, "y": 2, "z": 3}
+        }
+      },
+      "color": {
+        "palette": ["#ffffff", "#000000"]
+      },
+      "background": {
+        "hex": "#f5f5f5"
+      },
+      "output": {
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    "preset_id": "brand_neutral_cool"
+  }'
+```
+
+Expected response:
+```json
+{
+  "shot_id": "CUSTOM-001",
+  "hash": "<hash>",
+  "cached": false,
+  "url": "https://...",
+  "provider": "bria"
+}
+```
+
+After rendering, you can use standard endpoints:
+```bash
+# Get the shot
+curl "http://localhost:8000/shots/CUSTOM-001"
+
+# Explain how it was generated
+curl "http://localhost:8000/shots/CUSTOM-001/explain"
+```
+
 ## Complete Mock Flow (Copy-Paste Ready)
 
 ```bash

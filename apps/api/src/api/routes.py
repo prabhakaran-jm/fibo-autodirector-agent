@@ -39,6 +39,8 @@ from .models import (
     RenderJobResponse,
     JobProgressResponse,
     RenderResponseItem,
+    RenderShotSyncRequest,
+    RenderShotSyncResponse,
 )
 from .worker import enqueue_render_job
 from .fibo_provider import get_provider
@@ -276,6 +278,202 @@ async def render_sync(request: RenderRequest):
     return {"renders": results}
 
 
+@router.post("/render/shot/sync", response_model=RenderShotSyncResponse)
+async def render_shot_sync(request: RenderShotSyncRequest):
+    """
+    Render a single raw shot JSON payload synchronously.
+    No prior planning needed - accepts full FIBO JSON directly.
+
+    Supports two modes:
+    - Mode A (internal shot): requires shot_id, subject, camera, lens,
+      lighting, output
+    - Mode B (structured_prompt): requires shot_id, structured_prompt
+      (string or object), optional output
+    """
+    import json
+
+    shot = request.shot.copy()
+
+    # Always require shot_id
+    if "shot_id" not in shot:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required key: shot_id",
+        )
+
+    # Determine mode: structured_prompt mode or internal shot mode
+    has_structured_prompt = "structured_prompt" in shot
+    has_internal_format = all(
+        key in shot
+        for key in ["subject", "camera", "lens", "lighting", "output"]
+    )
+
+    rules_applied = []
+
+    if has_structured_prompt:
+        # Mode B: structured_prompt mode
+        rules_applied.append("structured_prompt_mode")
+
+        # Extract subject from structured_prompt if possible
+        sp = shot.get("structured_prompt")
+        if isinstance(sp, str):
+            try:
+                sp_obj = json.loads(sp)
+                if isinstance(sp_obj, dict) and "short_description" in sp_obj:
+                    shot["subject"] = sp_obj["short_description"]
+                else:
+                    shot["subject"] = "structured_prompt"
+            except (json.JSONDecodeError, TypeError):
+                shot["subject"] = "structured_prompt"
+        elif isinstance(sp, dict) and "short_description" in sp:
+            shot["subject"] = sp["short_description"]
+        else:
+            shot["subject"] = "structured_prompt"
+
+        # Set default output if not provided
+        if "output" not in shot:
+            shot["output"] = {
+                "width": 1024,
+                "height": 1024,
+                "bit_depth": 16,
+                "hdr": False,
+            }
+    elif has_internal_format:
+        # Mode A: internal shot format
+        rules_applied.append("manual_shot_payload")
+    else:
+        # Neither mode satisfied
+        if has_structured_prompt:
+            # Has structured_prompt but missing other fields - OK
+            pass
+        else:
+            # Missing required keys for internal format
+            missing_keys = [
+                key
+                for key in ["subject", "camera", "lens", "lighting", "output"]
+                if key not in shot
+            ]
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Missing required keys for internal shot format: "
+                    f"{', '.join(missing_keys)}. "
+                    f"Alternatively, provide 'structured_prompt' for "
+                    f"Bria mode."
+                ),
+            )
+
+    # Apply preset if provided (only for internal format)
+    from .rules import deep_merge, load_preset
+
+    if request.preset_id and not has_structured_prompt:
+        preset = load_preset(request.preset_id)
+        if preset:
+            shot = deep_merge(shot, preset)
+            rules_applied.append(f"preset_applied:{request.preset_id}")
+
+    # Compute hash
+    shot_hash = compute_hash(shot)
+    shot_id = shot["shot_id"]
+    start_time = time.time()
+
+    # Check cache
+    from .storage import (
+        get_artifact_by_hash,
+        save_artifact_by_hash,
+        create_shot_version,
+        update_shot_version_status,
+    )
+
+    cached_artifact = get_artifact_by_hash(shot_hash)
+    provider = get_provider()
+
+    if cached_artifact:
+        # Cache hit
+        duration_ms = int((time.time() - start_time) * 1000)
+        provider_name = cached_artifact.get("provider", "unknown")
+
+        # Upsert shot into storage
+        version_obj = create_shot_version(
+            shot_id,
+            shot,
+            parent_hash=None,
+            batch_id=None,
+            rules_applied=rules_applied,
+        )
+        update_shot_version_status(
+            shot_id,
+            version_obj["version"],
+            "done",
+            artifact_url=cached_artifact["url"],
+            duration_ms=duration_ms,
+        )
+
+        return RenderShotSyncResponse(
+            shot_id=shot_id,
+            hash=shot_hash,
+            cached=True,
+            url=cached_artifact["url"],
+            provider=provider_name,
+        )
+
+    # Render with provider
+    try:
+        result = provider.render(shot)
+        url = result["url"]
+        raw = result.get("raw", {})
+
+        provider_name = "mock" if "mock://" in url else "bria"
+        save_artifact_by_hash(shot_hash, url, provider_name, raw)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Upsert shot into storage
+        version_obj = create_shot_version(
+            shot_id,
+            shot,
+            parent_hash=None,
+            batch_id=None,
+            rules_applied=rules_applied,
+        )
+        update_shot_version_status(
+            shot_id,
+            version_obj["version"],
+            "done",
+            artifact_url=url,
+            duration_ms=duration_ms,
+        )
+
+        return RenderShotSyncResponse(
+            shot_id=shot_id,
+            hash=shot_hash,
+            cached=False,
+            url=url,
+            provider=provider_name,
+        )
+    except Exception as e:
+        error_msg = str(e)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Still create shot version but mark as failed
+        version_obj = create_shot_version(
+            shot_id,
+            shot,
+            parent_hash=None,
+            batch_id=None,
+            rules_applied=rules_applied,
+        )
+        update_shot_version_status(
+            shot_id,
+            version_obj["version"],
+            "failed",
+            last_error=error_msg,
+            duration_ms=duration_ms,
+        )
+
+        raise HTTPException(status_code=500, detail=f"Render failed: {error_msg}")
+
+
 # Version and patch endpoints
 
 class RerenderRequest(BaseModel):
@@ -452,6 +650,8 @@ async def compare_versions(
 @router.get("/shots/{shot_id}/explain")
 async def explain_shot(shot_id: str):
     """Explain how a shot was generated (deterministic explanation)."""
+    import json
+
     versions = get_shot_versions(shot_id)
     if not versions:
         raise HTTPException(
@@ -459,30 +659,100 @@ async def explain_shot(shot_id: str):
         )
 
     latest = max(versions, key=lambda v: v["version"])
-    shot_json = latest["json_payload"]
+    shot_json = latest.get("json_payload", {})
+    shot_hash = latest.get("hash", "")
 
-    # Extract derived parameters (non-default values)
-    derived_params = {}
-    if shot_json.get("camera", {}).get("fov") != 45:
-        derived_params["camera.fov"] = shot_json["camera"]["fov"]
-    if shot_json.get("lens", {}).get("aperture") != 2.8:
-        derived_params["lens.aperture"] = shot_json["lens"]["aperture"]
-    if shot_json.get("lighting", {}).get("key_light", {}).get("intensity") != 1.0:
-        derived_params["lighting.key_light.intensity"] = (
-            shot_json["lighting"]["key_light"]["intensity"]
-        )
+    # Determine mode
+    has_structured_prompt = "structured_prompt" in shot_json
+    mode = "structured_prompt" if has_structured_prompt else "internal_shot"
 
-    # Get all rules applied across versions
+    # Get all rules applied across versions (safely)
     all_rules = []
     for version in versions:
-        all_rules.extend(version.get("rules_applied", []))
+        version_rules = version.get("rules_applied", [])
+        if isinstance(version_rules, list):
+            all_rules.extend(version_rules)
+
+    # Extract subject summary and derived parameters based on mode
+    subject_summary = ""
+    derived_params = {}
+
+    if mode == "structured_prompt":
+        # Structured prompt mode
+        sp = shot_json.get("structured_prompt")
+        parse_failed = False
+
+        if isinstance(sp, str):
+            try:
+                sp_obj = json.loads(sp)
+                if isinstance(sp_obj, dict) and "short_description" in sp_obj:
+                    subject_summary = sp_obj["short_description"]
+                else:
+                    subject_summary = "structured_prompt (unparsed)"
+                    parse_failed = True
+            except (json.JSONDecodeError, TypeError):
+                subject_summary = "structured_prompt (unparsed)"
+                parse_failed = True
+        elif isinstance(sp, dict):
+            if "short_description" in sp:
+                subject_summary = sp["short_description"]
+            else:
+                subject_summary = "structured_prompt"
+        else:
+            subject_summary = "structured_prompt (unparsed)"
+            parse_failed = True
+
+        if parse_failed:
+            all_rules.append("structured_prompt_parse_failed")
+
+        # Add output dimensions if present
+        output = shot_json.get("output", {})
+        if isinstance(output, dict):
+            if "width" in output:
+                derived_params["output.width"] = output["width"]
+            if "height" in output:
+                derived_params["output.height"] = output["height"]
+    else:
+        # Internal shot mode
+        subject_summary = shot_json.get("subject", "unknown")
+
+        # Extract derived parameters (non-default values) - safely
+        camera = shot_json.get("camera", {})
+        if isinstance(camera, dict) and "fov" in camera:
+            fov = camera.get("fov")
+            if fov != 45:
+                derived_params["camera.fov"] = fov
+
+        lens = shot_json.get("lens", {})
+        if isinstance(lens, dict) and "aperture" in lens:
+            aperture = lens.get("aperture")
+            if aperture != 2.8:
+                derived_params["lens.aperture"] = aperture
+
+        lighting = shot_json.get("lighting", {})
+        if isinstance(lighting, dict):
+            key_light = lighting.get("key_light", {})
+            if isinstance(key_light, dict) and "intensity" in key_light:
+                intensity = key_light.get("intensity")
+                if intensity != 1.0:
+                    derived_params["lighting.key_light.intensity"] = intensity
+
+        # Add output dimensions if present
+        output = shot_json.get("output", {})
+        if isinstance(output, dict):
+            if "width" in output:
+                derived_params["output.width"] = output["width"]
+            if "height" in output:
+                derived_params["output.height"] = output["height"]
 
     return {
         "shot_id": shot_id,
-        "version": latest["version"],
-        "hash": latest["hash"],
+        "version": latest.get("version", 1),
+        "hash": shot_hash,
+        "mode": mode,
         "rules_applied": all_rules,
         "derived_parameters": derived_params,
+        "subject_summary": subject_summary,
         "why_this_is_reproducible": (
             "All parameters are explicit JSON fields. "
             "Re-running this JSON produces the same hash and output. "
