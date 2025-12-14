@@ -2,6 +2,7 @@
 
 import csv
 import io
+import time
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
 from pydantic import BaseModel
@@ -12,9 +13,20 @@ from .storage import (
     save_shots,
     list_shots,
     get_shot,
+    create_job,
+    get_job,
 )
 from .rules import expand_record_to_shot
 from .hashutil import hash_shot
+from .models import (
+    RenderRequest,
+    RenderJobResponse,
+    JobProgressResponse,
+    RenderResponseItem,
+)
+from .worker import enqueue_render_job
+from .fibo_provider import get_provider
+from .hashutil import hash_shot as compute_hash
 
 
 router = APIRouter()
@@ -33,24 +45,12 @@ class ShotListItem(BaseModel):
     shot_id: str
     hash: str
     subject: str
+    status: Optional[str] = None
+    artifact_url: Optional[str] = None
 
 
 class ShotListResponse(BaseModel):
     shots: List[ShotListItem]
-
-
-class RenderItem(BaseModel):
-    shot_id: str
-    cached: bool
-    url: str
-
-
-class RenderRequest(BaseModel):
-    shot_ids: List[str]
-
-
-class RenderResponse(BaseModel):
-    renders: List[RenderItem]
 
 
 @router.post("/ingest/csv", response_model=IngestResponse)
@@ -100,7 +100,7 @@ async def plan(
 
 @router.get("/shots", response_model=ShotListResponse)
 async def get_shots():
-    """List all shots with minimal info."""
+    """List all shots with minimal info including status and artifact_url."""
     shots = list_shots()
     return ShotListResponse(shots=shots)
 
@@ -116,22 +116,144 @@ async def get_shot_by_id(shot_id: str):
     return shot
 
 
-@router.post("/render", response_model=RenderResponse)
+@router.post("/render", response_model=RenderJobResponse)
 async def render(request: RenderRequest):
     """
-    Render shots (stub - does not call external API).
-    Returns mock renders with cached:false and mock:// URLs.
+    Enqueue a render job and return immediately.
+    Use GET /jobs/{job_id} to check progress.
     """
-    renders = []
-    for shot_id in request.shot_ids:
+    if not request.shot_ids:
+        # If no shot_ids provided, render all shots
+        all_shots = list_shots()
+        shot_ids = [s["shot_id"] for s in all_shots]
+    else:
+        shot_ids = request.shot_ids
+
+    job_id = create_job(shot_ids)
+    await enqueue_render_job(job_id)
+
+    return RenderJobResponse(job_id=job_id, queued=len(shot_ids))
+
+
+@router.get("/jobs/{job_id}", response_model=JobProgressResponse)
+async def get_job_status(job_id: str):
+    """Get job status and progress."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=404, detail=f"Job {job_id} not found"
+        )
+
+    # Convert results to RenderResponseItem
+    results = [
+        RenderResponseItem(**r) for r in job.get("results", [])
+    ]
+
+    return JobProgressResponse(
+        job_id=job_id,
+        status=job["status"],
+        progress=job["progress"],
+        results=results,
+    )
+
+
+@router.post("/render/sync")
+async def render_sync(request: RenderRequest):
+    """
+    Synchronous render endpoint for small demos.
+    Renders in the request thread but still uses cache.
+    """
+    if not request.shot_ids:
+        all_shots = list_shots()
+        shot_ids = [s["shot_id"] for s in all_shots]
+    else:
+        shot_ids = request.shot_ids
+
+    provider = get_provider()
+    results = []
+
+    for shot_id in shot_ids:
         shot = get_shot(shot_id)
-        if shot:
-            renders.append(
-                RenderItem(
+        if not shot:
+            results.append(
+                RenderResponseItem(
                     shot_id=shot_id,
                     cached=False,
-                    url=f"mock://render/{shot_id}",
+                    status="failed",
+                    error=f"Shot {shot_id} not found",
+                    hash="",
+                )
+            )
+            continue
+
+        shot_hash = shot.get("hash") or compute_hash(shot)
+        start_time = time.time()
+
+        # Check cache
+        from .storage import get_artifact_by_hash, save_artifact_by_hash
+        from .storage import update_shot_status
+
+        cached_artifact = get_artifact_by_hash(shot_hash)
+        if cached_artifact:
+            duration_ms = int((time.time() - start_time) * 1000)
+            update_shot_status(
+                shot_id,
+                "done",
+                artifact_url=cached_artifact["url"],
+                duration_ms=duration_ms,
+            )
+            results.append(
+                RenderResponseItem(
+                    shot_id=shot_id,
+                    cached=True,
+                    status="done",
+                    url=cached_artifact["url"],
+                    hash=shot_hash,
+                )
+            )
+            continue
+
+        # Render
+        try:
+            update_shot_status(shot_id, "running")
+            result = provider.render(shot)
+            url = result["url"]
+            raw = result.get("raw", {})
+
+            provider_name = "mock" if "mock://" in url else "bria"
+            save_artifact_by_hash(shot_hash, url, provider_name, raw)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            update_shot_status(
+                shot_id, "done", artifact_url=url, duration_ms=duration_ms
+            )
+
+            results.append(
+                RenderResponseItem(
+                    shot_id=shot_id,
+                    cached=False,
+                    status="done",
+                    url=url,
+                    hash=shot_hash,
+                )
+            )
+        except Exception as e:
+            error_msg = str(e)
+            duration_ms = int((time.time() - start_time) * 1000)
+            update_shot_status(
+                shot_id,
+                "failed",
+                last_error=error_msg,
+                duration_ms=duration_ms,
+            )
+            results.append(
+                RenderResponseItem(
+                    shot_id=shot_id,
+                    cached=False,
+                    status="failed",
+                    error=error_msg,
+                    hash=shot_hash,
                 )
             )
 
-    return RenderResponse(renders=renders)
+    return {"renders": results}

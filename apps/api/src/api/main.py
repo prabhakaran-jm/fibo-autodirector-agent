@@ -1,14 +1,9 @@
 """FastAPI application entry point."""
 
-from pathlib import Path
 from fastapi import FastAPI
-from dotenv import load_dotenv
 
 from .routes import router
-
-# Load environment variables from project root
-project_root = Path(__file__).parent.parent.parent.parent.parent
-load_dotenv(project_root / ".env")
+from .worker import start_worker
 
 app = FastAPI(
     title="FIBO AutoDirector Agent API",
@@ -17,6 +12,9 @@ app = FastAPI(
 )
 
 app.include_router(router)
+
+# Start worker on startup
+start_worker(app)
 
 
 @app.get("/")
@@ -32,4 +30,3 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "ok"}
-
