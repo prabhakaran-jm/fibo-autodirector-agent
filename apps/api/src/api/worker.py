@@ -3,16 +3,20 @@
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List
+from typing import Dict, List, Optional
 from fastapi import FastAPI
 
 from .storage import (
     get_shot,
+    get_shot_latest_version,
+    get_shot_version,
     get_artifact_by_hash,
     save_artifact_by_hash,
     update_shot_status,
+    update_shot_version_status,
     get_job,
     update_job,
+    increment_batch_cache_hits,
 )
 from .fibo_provider import get_provider
 from .config import FIBO_CONCURRENCY
@@ -33,17 +37,41 @@ async def enqueue_render_job(job_id: str) -> None:
     await _job_queue.put(job_id)
 
 
-async def _render_shot(shot_id: str, provider) -> Dict:
-    """Render a single shot."""
-    shot = get_shot(shot_id)
-    if not shot:
-        return {
-            "shot_id": shot_id,
-            "cached": False,
-            "status": "failed",
-            "error": f"Shot {shot_id} not found",
-            "hash": "",
-        }
+async def _render_shot(
+    shot_id: str, provider, version: Optional[int] = None
+) -> Dict:
+    """Render a single shot (or specific version)."""
+    # Get shot - use version if specified, otherwise latest
+    if version:
+        from .storage import get_shot_version
+        version_obj = get_shot_version(shot_id, version)
+        if not version_obj:
+            return {
+                "shot_id": shot_id,
+                "cached": False,
+                "status": "failed",
+                "error": f"Shot {shot_id} version {version} not found",
+                "hash": "",
+            }
+        shot = version_obj["json_payload"]
+        batch_id = version_obj.get("batch_id")
+    else:
+        shot = get_shot_latest_version(shot_id)
+        if not shot:
+            return {
+                "shot_id": shot_id,
+                "cached": False,
+                "status": "failed",
+                "error": f"Shot {shot_id} not found",
+                "hash": "",
+            }
+        # Get batch_id from latest version
+        from .storage import get_shot_versions
+        versions = get_shot_versions(shot_id)
+        batch_id = None
+        if versions:
+            latest_v = max(versions, key=lambda v: v["version"])
+            batch_id = latest_v.get("batch_id")
 
     shot_hash = shot.get("hash") or hash_shot(shot)
     start_time = time.time()
@@ -52,12 +80,26 @@ async def _render_shot(shot_id: str, provider) -> Dict:
     cached_artifact = get_artifact_by_hash(shot_hash)
     if cached_artifact:
         duration_ms = int((time.time() - start_time) * 1000)
-        update_shot_status(
-            shot_id,
-            "done",
-            artifact_url=cached_artifact["url"],
-            duration_ms=duration_ms,
-        )
+        if version:
+            update_shot_version_status(
+                shot_id,
+                version,
+                "done",
+                artifact_url=cached_artifact["url"],
+                duration_ms=duration_ms,
+            )
+        else:
+            update_shot_status(
+                shot_id,
+                "done",
+                artifact_url=cached_artifact["url"],
+                duration_ms=duration_ms,
+            )
+        
+        # Track cache hit
+        if batch_id:
+            increment_batch_cache_hits(batch_id)
+        
         return {
             "shot_id": shot_id,
             "cached": True,
@@ -68,7 +110,11 @@ async def _render_shot(shot_id: str, provider) -> Dict:
 
     # Render with provider (run in executor to avoid blocking event loop)
     try:
-        update_shot_status(shot_id, "running")
+        if version:
+            update_shot_version_status(shot_id, version, "running")
+        else:
+            update_shot_status(shot_id, "running")
+        
         # Run blocking provider.render in thread pool
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(_executor, provider.render, shot)
@@ -80,9 +126,14 @@ async def _render_shot(shot_id: str, provider) -> Dict:
         save_artifact_by_hash(shot_hash, url, provider_name, raw)
 
         duration_ms = int((time.time() - start_time) * 1000)
-        update_shot_status(
-            shot_id, "done", artifact_url=url, duration_ms=duration_ms
-        )
+        if version:
+            update_shot_version_status(
+                shot_id, version, "done", artifact_url=url, duration_ms=duration_ms
+            )
+        else:
+            update_shot_status(
+                shot_id, "done", artifact_url=url, duration_ms=duration_ms
+            )
 
         return {
             "shot_id": shot_id,
@@ -94,12 +145,21 @@ async def _render_shot(shot_id: str, provider) -> Dict:
     except Exception as e:
         error_msg = str(e)
         duration_ms = int((time.time() - start_time) * 1000)
-        update_shot_status(
-            shot_id,
-            "failed",
-            last_error=error_msg,
-            duration_ms=duration_ms,
-        )
+        if version:
+            update_shot_version_status(
+                shot_id,
+                version,
+                "failed",
+                last_error=error_msg,
+                duration_ms=duration_ms,
+            )
+        else:
+            update_shot_status(
+                shot_id,
+                "failed",
+                last_error=error_msg,
+                duration_ms=duration_ms,
+            )
         return {
             "shot_id": shot_id,
             "cached": False,
@@ -117,13 +177,15 @@ async def _process_job(job_id: str) -> None:
 
     update_job(job_id, status="running")
     shot_ids = job["shot_ids"]
+    shot_versions = job.get("shot_versions", {})
     provider = get_provider()
     results: List[Dict] = []
 
     # Process shots with concurrency control
     async def render_with_semaphore(shot_id: str):
         async with _semaphore:
-            return await _render_shot(shot_id, provider)
+            version = shot_versions.get(shot_id)
+            return await _render_shot(shot_id, provider, version=version)
 
     tasks = [render_with_semaphore(shot_id) for shot_id in shot_ids]
     results = await asyncio.gather(*tasks)

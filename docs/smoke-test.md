@@ -242,6 +242,187 @@ curl http://localhost:8000/jobs/$JOB_ID
 curl http://localhost:8000/shots/PROD-001 | jq '.artifact_url'
 ```
 
+## Flow 3: Review and Rerender Workflow
+
+### 1. Approve a Shot
+```bash
+# Approve latest version (no admin token required if ADMIN_TOKEN not set)
+curl -X POST "http://localhost:8000/shots/PROD-001/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Looks good!"}'
+```
+
+Expected response:
+```json
+{
+  "shot_id": "PROD-001",
+  "version": 1,
+  "review_status": "approved",
+  "review_note": "Looks good!"
+}
+```
+
+### 2. Patch and Rerender
+```bash
+# Create new version with JSON patch
+curl -X POST "http://localhost:8000/shots/PROD-001/rerender" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "json_patch": {
+      "camera": {
+        "fov": 60
+      },
+      "lighting": {
+        "key_light": {
+          "intensity": 0.8
+        }
+      }
+    }
+  }'
+```
+
+Expected response:
+```json
+{
+  "job_id": "<uuid>",
+  "shot_id": "PROD-001",
+  "version": 2,
+  "hash": "<new_hash>"
+}
+```
+
+### 3. Compare Versions
+```bash
+# Compare version 1 vs version 2
+curl "http://localhost:8000/shots/PROD-001/compare?from=1&to=2"
+```
+
+Expected response:
+```json
+{
+  "shot_id": "PROD-001",
+  "from_version": 1,
+  "to_version": 2,
+  "changes": [
+    {
+      "path": "camera.fov",
+      "old_value": 45,
+      "new_value": 60
+    },
+    {
+      "path": "lighting.key_light.intensity",
+      "old_value": 1.0,
+      "new_value": 0.8
+    }
+  ]
+}
+```
+
+### 4. List Versions
+```bash
+curl "http://localhost:8000/shots/PROD-001/versions"
+```
+
+Expected response:
+```json
+{
+  "shot_id": "PROD-001",
+  "versions": [
+    {
+      "version": 1,
+      "hash": "<hash>",
+      "status": "done",
+      "artifact_url": "mock://...",
+      "created_at": "...",
+      "parent_hash": null,
+      "review_status": "approved"
+    },
+    {
+      "version": 2,
+      "hash": "<new_hash>",
+      "status": "done",
+      "artifact_url": "mock://...",
+      "created_at": "...",
+      "parent_hash": "<hash>",
+      "review_status": "pending"
+    }
+  ]
+}
+```
+
+## Flow 4: Export and Download
+
+### 1. Export Batch
+```bash
+# Export manifest and report to disk
+curl -X POST "http://localhost:8000/export/batch/$BATCH_ID"
+```
+
+Expected response:
+```json
+{
+  "batch_id": "<batch_id>",
+  "paths": {
+    "manifest": "artifacts/<batch_id>/manifest.json",
+    "report": "artifacts/<batch_id>/report.json"
+  },
+  "message": "Export completed"
+}
+```
+
+### 2. Get Manifest
+```bash
+curl "http://localhost:8000/export/batch/$BATCH_ID/manifest"
+```
+
+### 3. Download Zip
+```bash
+# Download complete bundle as zip
+curl "http://localhost:8000/export/batch/$BATCH_ID/download" \
+  -o batch_export.zip
+```
+
+The zip contains:
+- `manifest.json` - shot metadata
+- `report.json` - batch statistics
+- `images/` - folder with images (mock provider) or `urls.txt` (bria provider)
+
+## Complete Judge Workflow (Copy-Paste Ready)
+
+```bash
+# 1. Ingest and plan
+BATCH_ID=$(curl -s -X POST "http://localhost:8000/ingest/csv" \
+  -F "file=@data/samples/products.csv" | jq -r '.batch_id')
+
+curl -X POST "http://localhost:8000/plan?batch_id=$BATCH_ID&preset_id=brand_neutral_cool"
+
+# 2. Render
+JOB_ID=$(curl -s -X POST "http://localhost:8000/render" \
+  -H "Content-Type: application/json" \
+  -d '{"shot_ids": ["PROD-001", "PROD-002", "PROD-003"]}' | jq -r '.job_id')
+
+# 3. Wait for completion
+sleep 3
+curl "http://localhost:8000/jobs/$JOB_ID"
+
+# 4. Approve a shot
+curl -X POST "http://localhost:8000/shots/PROD-001/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Approved"}'
+
+# 5. Rerender with patch
+curl -X POST "http://localhost:8000/shots/PROD-002/rerender" \
+  -H "Content-Type: application/json" \
+  -d '{"json_patch": {"camera": {"fov": 60}}}'
+
+# 6. Compare versions
+curl "http://localhost:8000/shots/PROD-002/compare?from=1&to=2"
+
+# 7. Export and download
+curl -X POST "http://localhost:8000/export/batch/$BATCH_ID"
+curl "http://localhost:8000/export/batch/$BATCH_ID/download" -o batch.zip
+```
+
 ## Notes
 
 - Mock provider works without any external API access
@@ -249,3 +430,6 @@ curl http://localhost:8000/shots/PROD-001 | jq '.artifact_url'
 - Job status can be `queued`, `running`, `done`, or `failed`
 - Shot status tracks: `queued`, `running`, `done`, `failed`
 - Artifact URLs are cached by hash for reproducibility
+- Shot versioning allows multiple iterations with JSON patches
+- Review workflow supports approve/reject with optional notes
+- Export creates downloadable zip with manifest, report, and images

@@ -211,3 +211,7 @@ __marimo__/
 node_modules/
 .next/
 dist/
+
+# Generated artifacts
+artifacts/
+*.zip

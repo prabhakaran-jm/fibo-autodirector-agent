@@ -103,6 +103,45 @@ The API supports two rendering modes:
 
 Renders are cached by deterministic JSON hash. Re-rendering the same shot JSON returns the cached artifact URL immediately with `cached: true`.
 
+### Judge Workflow
+
+The API supports a complete review and iteration workflow:
+
+1. **Ingest** → Upload CSV with product data
+2. **Plan** → Expand rows into FIBO shot JSON
+3. **Render** → Generate images (async or sync)
+4. **Approve/Reject** → Review shots with optional notes
+5. **Rerender** → Create new version with JSON patch
+6. **Compare** → View differences between versions
+7. **Export** → Download bundle (manifest, report, images)
+
+Example workflow:
+```bash
+# Ingest and plan
+BATCH_ID=$(curl -s -X POST "http://localhost:8000/ingest/csv" \
+  -F "file=@data/samples/products.csv" | jq -r '.batch_id')
+curl -X POST "http://localhost:8000/plan?batch_id=$BATCH_ID"
+
+# Render
+JOB_ID=$(curl -s -X POST "http://localhost:8000/render" \
+  -H "Content-Type: application/json" \
+  -d '{"shot_ids": ["PROD-001"]}' | jq -r '.job_id')
+
+# Approve
+curl -X POST "http://localhost:8000/shots/PROD-001/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Approved"}'
+
+# Rerender with patch
+curl -X POST "http://localhost:8000/shots/PROD-001/rerender" \
+  -H "Content-Type: application/json" \
+  -d '{"json_patch": {"camera": {"fov": 60}}}'
+
+# Export
+curl -X POST "http://localhost:8000/export/batch/$BATCH_ID"
+curl "http://localhost:8000/export/batch/$BATCH_ID/download" -o batch.zip
+```
+
 ### Smoke Test
 
 See [docs/smoke-test.md](docs/smoke-test.md) for complete curl-based smoke test commands.
